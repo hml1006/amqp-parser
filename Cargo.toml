@@ -6,4 +6,12 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[dev-dependencies]
+amqp-types = {git = "https://github.com/hml1006/amqp-types.git"}
+bytes = "0.5.4"
+nom = "5.1.2"
+
 [dependencies]
+amqp-types = {git = "https://github.com/hml1006/amqp-types.git"}
+bytes = "0.5.4"
+nom = "5.1.2"
