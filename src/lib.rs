@@ -1,10 +1,10 @@
-mod util;
+mod frame_codec;
 pub mod error;
-pub mod parser;
+pub mod parse;
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::parse_amqp_protocal_header;
+    use crate::parse::parse_amqp_protocal_header;
 
     #[test]
     fn test_protocol_header() {

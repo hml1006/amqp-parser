@@ -1,48 +1,25 @@
-use std::fmt;
-use nom::lib::std::fmt::Formatter;
+use std::{io, fmt};
+use std::fmt::{Display, Formatter};
 
-pub enum ErrorKind {
-    NeedContinue,
-    ReadProtocolHeaderTagFailed,
-    FrameError,
-    WrongProtocol,
-    VersionNotSupported
+#[derive(Debug)]
+pub enum FrameDecodeErr {
+    Incomplete,
+    UnknowFrameType,
+    UnknownClassType,
+    UnknownMethodType,
+    ParseAmqpHeaderFailed,
+    ParseFrameFailed,
+    Amqp(amqp_types::error::Error),
+    Io(io::Error)
 }
 
-impl ToString for ErrorKind {
-    fn to_string(&self) -> String {
+impl Display for FrameDecodeErr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            ErrorKind::NeedContinue => "NeedContinue",
-            ErrorKind::ReadProtocolHeaderTagFailed => "Read protocol header tag failed",
-            ErrorKind::FrameError => "Frame error",
-            ErrorKind::WrongProtocol => "Wrong protocol name",
-            ErrorKind::VersionNotSupported => "Version not supported"
-        }.parse().unwrap()
+            FrameDecodeErr::ParseFrameFailed => write!(f, "parse frame failed"),
+            FrameDecodeErr::Io(err) => write!(f, "{}", err)
+        }
     }
 }
 
-pub struct Error {
-    kind: ErrorKind
-}
-
-impl Error {
-    pub fn new(kind: ErrorKind) -> Self {
-        Error{ kind}
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.kind.to_string())
-    }
-}
-
-impl fmt::Debug for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.kind.to_string())
-    }
-}
-
-impl std::error::Error for Error {
-
-}
+impl std::error::Error for FrameDecodeErr {}
