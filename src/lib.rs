@@ -1,3 +1,12 @@
+mod confirm;
+mod tx;
+mod basic;
+mod queue;
+mod exchange;
+mod access;
+mod channel;
+mod connection;
+mod common;
 mod frame_codec;
 pub mod error;
 pub mod parse;

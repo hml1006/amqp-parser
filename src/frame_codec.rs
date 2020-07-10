@@ -10,6 +10,7 @@ use amqp_types::frame::ProtocolHeader;
 use crate::error::FrameDecodeErr;
 use crate::parse::{parse_amqp_protocal_header, parse_method_frame, parse_content_header_frame, parse_content_body_frame, parse_heartbeat_frame};
 use crate::frame_codec::DecodedFrame::AmqpFrame;
+use nom::error::ErrorKind;
 
 pub enum DecodedFrame {
     ProtocolHeader(ProtocolHeader),
@@ -52,7 +53,7 @@ impl Decoder for FrameCodec {
         // +-frame type: u8-+---channel id: u16---+-----length: u32-----+----payload---+--frame end--+
         // |   1|2|3|4      |       0x0000        |     payload length  |              |  0xce       |
         // +----------------+---------------------+---------------------+--------------+-------------+
-        let (buffer, frame_type_id) = match be_u8(src) {
+        let (buffer, frame_type_id) = match be_u8::<(_, ErrorKind)>(src) {
             Ok(ret) => ret,
             Err(e) => {
                 match e {
