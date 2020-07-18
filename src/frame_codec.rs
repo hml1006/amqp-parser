@@ -1,11 +1,7 @@
 use tokio_util::codec::Decoder;
 use amqp_types::{Frame, FrameType};
 use bytes::BytesMut;
-use nom::bytes::streaming::take;
-use nom::number::streaming::{be_u16, be_u32, be_u8};
-use std::fmt::Display;
-use nom::lib::std::fmt::Formatter;
-use std::io;
+use nom::number::streaming::be_u8;
 use amqp_types::frame::ProtocolHeader;
 use crate::error::FrameDecodeErr;
 use crate::parse::{parse_amqp_protocal_header, parse_method_frame, parse_content_header_frame, parse_content_body_frame, parse_heartbeat_frame};

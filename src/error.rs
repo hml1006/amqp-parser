@@ -1,7 +1,6 @@
 use std::{io, fmt};
 use std::fmt::{Display, Formatter};
 use std::io::Error;
-use nom::error::{ParseError, ErrorKind};
 
 #[derive(Debug)]
 pub enum FrameDecodeErr {

@@ -1,15 +1,11 @@
-use bytes::Bytes;
-use amqp_types::frame::{ProtocolHeader, Arguments, Class, Method, ConnectionMethod, ChannelMethod, AccessMethod, ExchangeMethod, QueueMethod, BasicMethod, TxMethod, ConnectionStartOk, ConnectionSecure, ConnectionSecureOk, ConnectionTune, ConnectionTuneOk, ConnectionOpen, ConnectionOpenOk, ConnectionClose, ConnectionCloseOk, ChannelOpen, ChannelOpenOk, ChannelFlow, ChannelFlowOk, ChannelClose, ChannelCloseOk, AccessRequest, AccessRequestOk, ExchangeDeclare, ExchangeDeclareOk, ExchangeDelete, ExchangeDeleteOk, ExchangeBind, ExchangeBindOk, ExchangeUnbind, ExchangeUnbindOk, ConfirmMethod};
-use nom::{Err, Needed, IResult, tag};
-use crate::{error};
-use amqp_types::{Frame, FrameType, ShortStr, LongStr, FieldArray, FieldTable, FieldValue, FieldName, Decimal, ConnectionStart};
-use nom::number::complete::{be_u16, be_u32, be_i16, be_i8, be_u8, be_i32, be_u64, be_i64, be_f32, be_f64};
-use nom::bytes::streaming::{take, tag};
+use std::result::Result;
+use amqp_types::frame::{ProtocolHeader, Arguments, Class, Method, ConnectionMethod, ChannelMethod, AccessMethod, ExchangeMethod, QueueMethod, BasicMethod, TxMethod, ConfirmMethod, MethodPayload, Payload};
+use amqp_types::{Frame, FrameType};
+use nom::number::complete::{be_u16, be_u8, be_u64};
+use nom::bytes::streaming::{tag, take};
 use crate::error::FrameDecodeErr;
-use amqp_types::basic_types::FieldValueKind;
 use nom::error::ErrorKind;
-use nom::lib::std::fmt::Error;
-use crate::common::{parse_field_table, parse_long_string, parse_short_string, get_method_type, parse_channel_id_and_length};
+use crate::common::{get_method_type, parse_channel_id_and_length};
 use crate::connection::{parse_connection_start, parse_connection_start_ok, parse_connection_tune, parse_connection_tune_ok, parse_connection_secure, parse_connection_secure_ok, parse_connection_open, parse_connection_open_ok, parse_connection_close, parse_connection_close_ok};
 use crate::channel::{parse_channel_open, parse_channel_open_ok, parse_channel_flow, parse_channel_flow_ok, parse_channel_close, parse_channel_close_ok};
 use crate::access::{parse_access_request, parse_access_request_ok};
@@ -18,6 +14,7 @@ use crate::queue::{parse_queue_delete, parse_queue_declare, parse_queue_declare_
 use crate::basic::{parse_basic_delivery, parse_basic_qos_ok, parse_basic_consume, parse_basic_consume_ok, parse_basic_cancel, parse_basic_cancel_ok, parse_basic_publish, parse_basic_return, parse_basic_get, parse_basic_get_ok, parse_basic_reject, parse_basic_recover_async, parse_basic_recover, parse_basic_recover_ok, parse_basic_ack, parse_basic_nack, parse_basic_qos, parse_basic_get_empty};
 use crate::tx::{parse_tx_select, parse_tx_select_ok, parse_tx_commit, parse_tx_commit_ok, parse_tx_rollback, parse_tx_rollback_ok};
 use crate::confirm::{parse_confirm_select, parse_confirm_select_ok};
+use nom::{Err, Needed};
 
 pub const PROTOCOL_HEADER_SIZE: usize = 8;
 
@@ -25,7 +22,7 @@ pub const PROTOCOL_HEADER_SIZE: usize = 8;
 // |   1|2|3|4      |       0x0000        |     payload length  |              |  0xce       |
 // +----------------+---------------------+---------------------+--------------+-------------+
 // size_of(frame_type + channel_id + length)
-pub const FRAME_PREFIX_LENGTH: usize = 7;
+pub const FRAME_PREFIX_LENGTH: u32 = 7;
 
 // parse protocol header
 pub fn parse_amqp_protocal_header(buffer: &[u8]) -> Result<ProtocolHeader, FrameDecodeErr> {
@@ -170,8 +167,6 @@ pub(crate) fn parse_arguments(method: Method, buffer: &[u8]) -> Result<Arguments
 }
 
 
-
-
 pub(crate) fn parse_method_frame(buffer: &[u8]) -> Result<(u32, Frame), FrameDecodeErr> {
     // skip frame type
     let (buffer, _) = match be_u8::<(_, ErrorKind)>(buffer) {
@@ -183,7 +178,7 @@ pub(crate) fn parse_method_frame(buffer: &[u8]) -> Result<(u32, Frame), FrameDec
             }
         }
     };
-    let (buffer, channel_id, length) = match parse_channel_id_and_length(buffer) {
+    let (buffer, channel_id, payload_length) = match parse_channel_id_and_length(buffer) {
         Ok(ret) => ret,
         Err(e) => {
             match e {
@@ -192,10 +187,20 @@ pub(crate) fn parse_method_frame(buffer: &[u8]) -> Result<(u32, Frame), FrameDec
             }
         }
     };
-    let frame_length = FRAME_PREFIX_LENGTH + length as usize;
+    let frame_length = FRAME_PREFIX_LENGTH + payload_length as u32;
+
+    let (buffer, payload) = match take::<_,_,(_, ErrorKind)>(payload_length)(buffer) {
+        Ok(ret) => ret,
+        Err(e) => {
+            match e {
+                Err::Incomplete(Needed::Size(_)) => return Err(FrameDecodeErr::Incomplete),
+                _ => return Err(FrameDecodeErr::ParseFrameFailed)
+            }
+        }
+    };
 
     // check length
-    if buffer.len() < frame_length {
+    if buffer.len() < frame_length as usize {
         return Err(FrameDecodeErr::Incomplete)
     }
 
@@ -219,18 +224,81 @@ pub(crate) fn parse_method_frame(buffer: &[u8]) -> Result<(u32, Frame), FrameDec
         Err(e) => return Err(e)
     };
 
+    let args = match parse_arguments(method_type, payload) {
+        Ok(args) => args,
+        Err(e) => return Err(e)
+    };
+    let payload = MethodPayload::default();
+    payload.set_class(class_type);
+    payload.set_method(method_type);
+    payload.set_args(args);
+    let payload = Payload::Method(payload);
+
     let frame = Frame::default();
     frame.set_frame_type(FrameType::METHOD);
     frame.set_channel(channel_id);
-    frame.set_length(length);
-    frame.set_class(class_type);
-    frame.set_method(method_type);
+    frame.set_length(payload_length);
+    frame.set_payload(payload);
 
+    Ok((frame_length, frame))
 }
 
 pub(crate) fn parse_content_header_frame(buffer: &[u8]) -> Result<(u32, Frame), FrameDecodeErr> {
+    // skip frame type
+    let (buffer, _) = match be_u8::<(_, ErrorKind)>(buffer) {
+        Ok(ret) => ret,
+        Err(e) => {
+            match e {
+                nom::Err::Incomplete(_) => return Err(FrameDecodeErr::Incomplete),
+                _ => return Err(FrameDecodeErr::ParseFrameFailed)
+            }
+        }
+    };
+    let (buffer, channel_id, payload_length) = match parse_channel_id_and_length(buffer) {
+        Ok(ret) => ret,
+        Err(e) => {
+            match e {
+                FrameDecodeErr::Incomplete => return Err(e),
+                _ => return Err(FrameDecodeErr::ParseFrameFailed)
+            }
+        }
+    };
+
+    // take payload
+    let (buffer, payload) = match take::<_,_,(_, ErrorKind)>(payload_length)(buffer) {
+        Ok(ret) => ret,
+        Err(e) => {
+            match e {
+                Err::Incomplete(Needed::Size(_)) => return Err(FrameDecodeErr::Incomplete),
+                _ => return Err(FrameDecodeErr::ParseFrameFailed)
+            }
+        }
+    };
+
+    // pase payload
+    let (remain, class_id) = match be_u16::<(_, ErrorKind)>(buffer) {
+        Ok(ret) => ret,
+        Err(e) => return Err(FrameDecodeErr::ParseFrameFailed)
+    };
+    let class_type = Class::from(class_id);
+    if let Class::Unknown = class_type {
+        return Err(FrameDecodeErr::UnknownClassType);
+    }
+    let (remain, weight) = match be_u16::<(_, ErrorKind)>(remain) {
+        Ok(ret) => ret,
+        Err(e) => return Err(FrameDecodeErr::ParseFrameFailed)
+    };
+    let (remain, body_size) = match be_u64::<(_, ErrorKind)>(remain) {
+        Ok(ret) => ret,
+        Err(e) => return Err(FrameDecodeErr::ParseFrameFailed)
+    };
+
+
+    let frame_length = FRAME_PREFIX_LENGTH + payload_length as u32;
     let frame = Frame::default();
     frame.set_frame_type(FrameType::HEADER);
+    frame.set_channel(channel_id);
+    frame.set_length(payload_length);
 }
 
 pub(crate) fn parse_content_body_frame(buffer: &[u8]) -> Result<(u32, Frame), FrameDecodeErr> {
@@ -241,4 +309,24 @@ pub(crate) fn parse_content_body_frame(buffer: &[u8]) -> Result<(u32, Frame), Fr
 pub(crate) fn parse_heartbeat_frame(buffer: &[u8]) -> Result<(u32, Frame), FrameDecodeErr> {
     let frame = Frame::default();
     frame.set_frame_type(FrameType::HEARTBEAT);
+}
+
+pub fn parse_frame(buffer: &[u8]) -> Result<(u32, Frame), FrameDecodeErr> {
+    let (buffer, frame_type) = match be_u8::<(_, ErrorKind)>(buffer) {
+        Ok(ret) => ret,
+        Err(e) => {
+            match e {
+                nom::Err::Incomplete(_) => return Err(FrameDecodeErr::Incomplete),
+                _ => return Err(FrameDecodeErr::ParseFrameFailed)
+            }
+        }
+    };
+    let frame_type = FrameType::from(frame_type);
+    match frame_type {
+        FrameType::HEARTBEAT => parse_heartbeat_frame(buffer),
+        FrameType::METHOD => parse_method_frame(buffer),
+        FrameType::HEADER => parse_content_header_frame(buffer),
+        FrameType::BODY => parse_content_body_frame(buffer),
+        FrameType::UNKNOWN => return Err(FrameDecodeErr::UnknowFrameType)
+    }
 }

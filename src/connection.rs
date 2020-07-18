@@ -1,5 +1,5 @@
 use crate::error::FrameDecodeErr;
-use amqp_types::frame::{Arguments, ConnectionClose, Class, ConnectionOpenOk, ConnectionOpen, ConnectionTuneOk, ConnectionTune, ConnectionSecureOk, ConnectionSecure, ConnectionStartOk, ConnectionCloseOk};
+use amqp_types::frame::{Arguments, ConnectionClose, Class, ConnectionOpenOk, ConnectionOpen, ConnectionTuneOk, ConnectionTune, ConnectionSecureOk, ConnectionSecure, ConnectionStartOk, ConnectionCloseOk, Property, ConnectionProperties};
 use nom::error::ErrorKind;
 use nom::number::complete::{be_u8, be_u16, be_u32};
 use crate::common::{get_method_type, parse_short_string, parse_long_string, parse_field_table};
@@ -193,4 +193,14 @@ pub(crate) fn parse_connection_close_ok(buffer: &[u8]) -> Result<Arguments, Fram
     let connection_close_ok = ConnectionCloseOk::default();
     connection_close_ok.set_dummy(dummy);
     Ok(Arguments::ConnectionCloseOk(connection_close_ok))
+}
+
+pub(crate) fn parse_connection_properties(buffer: &[u8]) -> Result<Property, FrameDecodeErr> {
+    let (buffer, flags) = match be_u16::<(_, ErrorKind)>(buffer) {
+        Ok(ret) => ret,
+        Err(e) => return Err(FrameDecodeErr::ParseFrameFailed)
+    };
+    let property = ConnectionProperties::default();
+    property.set_flags(flags);
+    Ok(Property::Connection(property))
 }
